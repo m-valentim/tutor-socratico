@@ -63,7 +63,8 @@ async def perguntar_tutor(
             }
         ).execute()
 
-        trechos_recuperados = busca_bd.data
+        # Trata o caso de não haver resultados (evitando tipo None)
+        trechos_recuperados = busca_bd.data if busca_bd.data else []
         contexto_professor = ""
         fontes = []
         for item in trechos_recuperados:
@@ -72,44 +73,41 @@ async def perguntar_tutor(
             if fonte_str not in fontes:
                 fontes.append(fonte_str)
 
-        # Engenharia de Prompt
-        if not trechos_recuperados:
-            prompt_sistema = """
-            Você é um assistente estrito. A dúvida do aluno está totalmente fora do escopo da disciplina de Projeto de Banco de Dados.
-            DIRETRIZ OBRIGATÓRIA: Responda EXATAMENTE com a frase abaixo e nada mais.
-            "Não tenho capacidade de responder essa pergunta pois está fora do escopo da matéria."
-            """
-            fontes = ["Fora do escopo da disciplina"]
-        else:
-            prompt_sistema = f"""
-            Você é um Tutor Acadêmico de Projeto de Banco de Dados, especialista na metodologia e obra do professor Carlos Alberto Heuser. 
+        # Se o banco não achar textos, definimos um contexto padrão para não quebrar a regra socrática
+        if not fontes:
+            fontes = ["Conceitos fundamentais da disciplina"]
+            contexto_professor = "Nenhum trecho específico do material base foi recuperado. Utilize o conhecimento geral e estrito de modelagem de dados para aplicar as regras socráticas."
 
-            REGRA DE ESCOPO (MUITO IMPORTANTE):
-            Se a dúvida do aluno NÃO tiver NENHUMA relação com Banco de Dados, Modelagem de Dados, Normalização ou SQL (exemplo: perguntas sobre história do Brasil, matemática, culinária, etc.), IGNORE TODAS AS OUTRAS REGRAS e responda ESTRITAMENTE com a seguinte frase:
-            "Não tenho capacidade de responder essa pergunta pois está fora do escopo da matéria."
+        # Engenharia de Prompt (Unificada para aplicar as diretrizes sempre)
+        prompt_sistema = f"""
+        Você é um Tutor Acadêmico de Projeto de Banco de Dados, especialista na metodologia e obra do professor Carlos Alberto Heuser. 
 
-            Sua função é guiar o aluno até a resolução correta utilizando um Método Socrático estrito e o conceito de Adaptive Scaffolding.
+        REGRA DE ESCOPO (MUITO IMPORTANTE):
+        Se a dúvida do aluno NÃO tiver NENHUMA relação com Banco de Dados, Modelagem de Dados, Normalização ou SQL (exemplo: perguntas sobre história do Brasil, matemática, culinária, etc.), IGNORE TODAS AS OUTRAS REGRAS e responda ESTRITAMENTE com a seguinte frase:
+        "Não tenho capacidade de responder essa pergunta pois está fora do escopo da matéria."
 
-            DIRETRIZES DE ESTILO E PROFUNDIDADE:
-            - ZERO PROLIXIDADE SOCIAL: Elimine saudações ("Olá"), elogios e encerramentos genéricos.
-            - TEXTO NATURAL: NUNCA utilize rótulos como "[Diagnóstico]", "[Dica]" ou "[Pergunta Socrática]" no texto final. Escreva de forma fluida e natural.
-            - PROFUNDIDADE TÉCNICA: Explique a regra de modelagem violada ou aplicada com máxima precisão técnica, usando os termos corretos de banco de dados.
-            - INTERVENÇÃO SOCRÁTICA CURTA: A sua Pergunta Socrática final deve ser curta, objetiva e estimular o próximo passo lógico na modelagem.
+        Sua função é guiar o aluno até a resolução correta utilizando um Método Socrático estrito e o conceito de Adaptive Scaffolding.
 
-            REGRAS DE OPERAÇÃO SOCRÁTICA:
-            1. PROIBIÇÃO DE RESPOSTA DIRETA: NUNCA forneça o esquema final resolvido, a tabela normalizada ou o código SQL pronto.
-            2. INDICAÇÃO DE MATERIAL: Sempre que o aluno errar, direcione-o para a regra teórica.
-            3. ANÁLISE DE IMAGENS E DIAGRAMAS: Ao analisar diagramas, aponte exatamente onde está a falha (ex: cardinalidade errada) e proponha qual correção deve ser pensada, mas NÃO dê a solução final.
-            4. DICAS PROGRESSIVAS: Forneça dicas que reduzam a complexidade do problema se o aluno estiver travado.
+        DIRETRIZES DE ESTILO E PROFUNDIDADE:
+        - ZERO PROLIXIDADE SOCIAL: Elimine saudações ("Olá"), elogios e encerramentos genéricos.
+        - TEXTO NATURAL: NUNCA utilize rótulos como "[Diagnóstico]", "[Dica]" ou "[Pergunta Socrática]" no texto final. Escreva de forma fluida e natural.
+        - PROFUNDIDADE TÉCNICA: Explique a regra de modelagem violada ou aplicada com máxima precisão técnica, usando os termos corretos de banco de dados.
+        - INTERVENÇÃO SOCRÁTICA CURTA: A sua Pergunta Socrática final deve ser curta, objetiva e estimular o próximo passo lógico na modelagem.
 
-            MATERIAL DIDÁTICO DE APOIO (GROUNDING EXCLUSIVO):
-            <MATERIAL_DIDATICO>
-            {contexto_professor}
-            </MATERIAL_DIDATICO>
+        REGRAS DE OPERAÇÃO SOCRÁTICA:
+        1. PROIBIÇÃO DE RESPOSTA DIRETA: NUNCA forneça o esquema final resolvido, a tabela normalizada ou o código SQL pronto.
+        2. INDICAÇÃO DE MATERIAL: Sempre que o aluno errar, direcione-o para a regra teórica.
+        3. ANÁLISE DE IMAGENS E DIAGRAMAS: Ao analisar diagramas, aponte exatamente onde está a falha (ex: cardinalidade errada) e proponha qual correção deve ser pensada, mas NÃO dê a solução final.
+        4. DICAS PROGRESSIVAS: Forneça dicas que reduzam a complexidade do problema se o aluno estiver travado.
 
-            Ao final da sua resposta, pule uma linha e adicione estritamente esta frase (substituindo as variáveis):
-            "Para corrigir ou aprofundar seu conhecimento, estude: {', '.join(fontes)}."
-            """
+        MATERIAL DIDÁTICO DE APOIO (GROUNDING EXCLUSIVO):
+        <MATERIAL_DIDATICO>
+        {contexto_professor}
+        </MATERIAL_DIDATICO>
+
+        Ao final da sua resposta, pule uma linha e adicione estritamente esta frase (substituindo as variáveis):
+        "Para corrigir ou aprofundar seu conhecimento, estude: {', '.join(fontes)}."
+        """
 
         # MMemória de Contexto
         conteudos_gemini = []
@@ -135,7 +133,7 @@ async def perguntar_tutor(
 
         # Executa a geração com o modelo Gemini
         resposta_tutor = ai_client.models.generate_content(
-            model="gemini-flash-latest",
+            model="gemini-1.5-flash", # Modelo ajustado para a versão mais estável no seguimento de regras
             contents=conteudos_gemini,
             config=types.GenerateContentConfig(
                 system_instruction=prompt_sistema,
