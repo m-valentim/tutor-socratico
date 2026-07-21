@@ -133,7 +133,7 @@ async def perguntar_tutor(
 
         # Executa a geração com o modelo Gemini
         resposta_tutor = ai_client.models.generate_content(
-            model="gemini-2.5-flash", # Modelo ajustado para a versão mais estável no seguimento de regras
+            model="gemini-flash-latest", # Modelo ajustado para a versão mais estável no seguimento de regras
             contents=conteudos_gemini,
             config=types.GenerateContentConfig(
                 system_instruction=prompt_sistema,
