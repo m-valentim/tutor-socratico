@@ -1,0 +1,17 @@
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/.env
+backend/*.pyc
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# Geral
+.DS_Store
+.vscode/
+.idea/
+*.sqlite
+*.sqlite3
