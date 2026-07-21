@@ -64,7 +64,7 @@ function App() {
 
     setMessages((prev) => [...prev, userMessage]);
     setLoading(true);
-    
+
     const currentInput = input;
     const currentImage = image;
     setInput('');
@@ -79,7 +79,9 @@ function App() {
     }
 
     try {
-      const response = await axios.post('http://127.0.0.1:8000/tutor/perguntar', formData, {
+      const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+
+      const response = await axios.post(`${API_URL}/tutor/perguntar`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
@@ -87,14 +89,14 @@ function App() {
         ...prev,
         { sender: 'tutor', text: response.data.resposta_socratica, fontes: response.data.fontes_utilizadas }
       ]);
-      
+
     } catch (error) {
       let mensagemErro = 'Erro ao conectar com o servidor do tutor. Certifique-se de que o backend está online.';
 
       // Verifica se o servidor do backend conseguiu responder e se enviou um status de erro
       if (error.response) {
         const status = error.response.status;
-        
+
         if (status === 503 || status === 429) {
           mensagemErro = 'O servidor da IA está muito ocupado no momento. Por favor, aguarde alguns segundos e tente enviar novamente.';
         } else if (status === 500) {
@@ -106,7 +108,7 @@ function App() {
         ...prev,
         { sender: 'tutor', text: mensagemErro }
       ]);
-      
+
     } finally {
       setLoading(false);
     }
@@ -114,7 +116,7 @@ function App() {
 
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-sans">
-      
+
       {/*LADO ESQUERDO: UPLOAD DE IMAGENS*/}
       <div className="w-1/3 border-r border-gray-800 bg-gray-950 p-6 flex flex-col justify-between">
         <div>
@@ -122,17 +124,17 @@ function App() {
             <FileText size={22} /> Imagens
           </h2>
           <p className="text-sm text-gray-400 mb-6">Suba aqui prints ou fotos de seus diagramas, tabelas ou cálculos.</p>
-          
-          <input 
-            type="file" 
-            accept="image/*" 
-            className="hidden" 
-            ref={fileInputRef} 
-            onChange={handleImageChange} 
+
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleImageChange}
           />
 
           {!imagePreview ? (
-            <div 
+            <div
               onClick={() => fileInputRef.current.click()}
               className="border-2 border-dashed border-gray-800 hover:border-indigo-500 rounded-xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer transition bg-gray-900/50"
             >
@@ -142,7 +144,7 @@ function App() {
           ) : (
             <div className="relative border border-gray-800 rounded-xl overflow-hidden bg-gray-900">
               <img src={imagePreview} alt="Preview" className="w-full h-auto max-h-96 object-contain" />
-              <button 
+              <button
                 onClick={removeImage}
                 className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 p-1.5 rounded-full text-white transition shadow-lg"
               >
@@ -155,7 +157,7 @@ function App() {
 
       {/*LADO DIREITO: CHAT*/}
       <div className="w-2/3 flex flex-col h-full bg-gray-900">
-        
+
         {/*Header*/}
         <div className="p-4 border-b border-gray-800 bg-gray-950 flex items-center justify-between shadow-sm z-10">
           <div className="flex items-center gap-3">
@@ -170,8 +172,8 @@ function App() {
               </span>
             </div>
           </div>
-          
-          <button 
+
+          <button
             onClick={limparHistorico}
             title="Limpar histórico de conversa"
             className="text-gray-500 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-gray-900 flex items-center gap-2"
@@ -220,14 +222,14 @@ function App() {
               <ImageIcon size={14} className="text-indigo-400" /> Imagem anexada
             </div>
           )}
-          <input 
+          <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={imagePreview ? "Digite uma dúvida sobre a imagem..." : "Faça uma pergunta sobre a matéria..."}
             className="flex-1 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-inner"
           />
-          <button 
+          <button
             type="submit"
             disabled={loading || (!input.trim() && !image)}
             className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:border-gray-700 p-3 rounded-xl text-white transition-all shadow-md active:scale-95 flex items-center justify-center border border-indigo-500 disabled:shadow-none"
