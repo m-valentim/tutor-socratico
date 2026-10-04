@@ -1,16 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { Send, Upload, X, Bot, User, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { Send, Paperclip, X, BookOpen, Trash2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 function App() {
-  // Inicializa as mensagens lendo o localStorage ou usando a padrão
   const [messages, setMessages] = useState(() => {
     const historicoSalvo = localStorage.getItem('@tutorSocratico:historico');
     if (historicoSalvo) {
       return JSON.parse(historicoSalvo);
     }
     return [
-      { sender: 'tutor', text: 'Olá! Sou seu tutor de Banco de Dados. Envie sua dúvida.', isWelcome: true }
+      { sender: 'tutor', text: 'Sou seu tutor em Projeto de Banco de Dados. Envie suas dúvidas.', isWelcome: true }
     ];
   });
 
@@ -18,17 +18,22 @@ function App() {
   const [image, setImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [loading, setLoading] = useState(false);
+  
+  // NOVO ESTADO: Controla a imagem que está ampliada em tela cheia
+  const [zoomedImage, setZoomedImage] = useState(null);
+  
   const fileInputRef = useRef(null);
+  const chatEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
-  // Salva no localStorage sempre que o array de mensagens mudar
   useEffect(() => {
     localStorage.setItem('@tutorSocratico:historico', JSON.stringify(messages));
-  }, [messages]);
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
 
-  // Função para limpar a conversa da tela e da memória
   const limparHistorico = () => {
     localStorage.removeItem('@tutorSocratico:historico');
-    setMessages([{ sender: 'tutor', text: 'Olá, sou seu tutor de Banco de Dados. Envie sua dúvida.', isWelcome: true }]);
+    setMessages([{ sender: 'tutor', text: 'Sou seu tutor em Projeto de Banco de Dados. Envie suas dúvidas.', isWelcome: true }]);
   };
 
   const handleImageChange = (e) => {
@@ -45,6 +50,19 @@ function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handleInput = (e) => {
+    setInput(e.target.value);
+    e.target.style.height = 'auto'; 
+    e.target.style.height = `${e.target.scrollHeight}px`; 
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault(); 
+      handleSend(e);
+    }
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim() && !image) return;
@@ -55,11 +73,10 @@ function App() {
       image: imagePreview
     };
 
-    // Prepara o histórico antes de adicionar a mensagem atual, extraindo apenas o texto
     const historicoParaEnvio = messages.map(msg => ({
       sender: msg.sender,
       text: msg.text,
-      isWelcome: msg.isWelcome || msg.text.includes('Olá! Sou seu tutor') || msg.text.includes('Histórico limpo')
+      isWelcome: msg.isWelcome || msg.text.includes('Sou seu tutor')
     }));
 
     setMessages((prev) => [...prev, userMessage]);
@@ -67,8 +84,13 @@ function App() {
 
     const currentInput = input;
     const currentImage = image;
+    
     setInput('');
     removeImage();
+    
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
 
     const formData = new FormData();
     formData.append('duvida', currentInput || 'Analise a imagem enviada.');
@@ -91,154 +113,225 @@ function App() {
       ]);
 
     } catch (error) {
-      let mensagemErro = 'Erro ao conectar com o servidor do tutor. Certifique-se de que o backend está online.';
-
-      // Verifica se o servidor do backend conseguiu responder e se enviou um status de erro
-      if (error.response) {
-        const status = error.response.status;
-
-        if (status === 503 || status === 429) {
-          mensagemErro = 'O servidor da IA está muito ocupado no momento. Por favor, aguarde alguns segundos e tente enviar novamente.';
-        } else if (status === 500) {
-          mensagemErro = 'Ocorreu um erro interno ao processar sua dúvida. Tente novamente ou reformule a pergunta.';
-        }
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { sender: 'tutor', text: mensagemErro }
-      ]);
-
+      let mensagemErro = 'Erro ao conectar com o servidor do tutor.';
+      setMessages((prev) => [...prev, { sender: 'tutor', text: mensagemErro }]);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex h-screen bg-gray-900 text-gray-100 font-sans">
-
-      {/*LADO ESQUERDO: UPLOAD DE IMAGENS*/}
-      <div className="w-1/3 border-r border-gray-800 bg-gray-950 p-6 flex flex-col justify-between">
-        <div>
-          <h2 className="text-xl font-bold mb-2 flex items-center gap-2 text-indigo-400">
-            <FileText size={22} /> Imagens
-          </h2>
-          <p className="text-sm text-gray-400 mb-6">Suba aqui prints ou fotos de seus diagramas, tabelas ou cálculos.</p>
-
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            ref={fileInputRef}
-            onChange={handleImageChange}
-          />
-
-          {!imagePreview ? (
-            <div
-              onClick={() => fileInputRef.current.click()}
-              className="border-2 border-dashed border-gray-800 hover:border-indigo-500 rounded-xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer transition bg-gray-900/50"
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-200 font-sans antialiased selection:bg-indigo-900/50 relative">
+      
+      {/* MODAL DE IMAGEM AMPLIADA (LIGHTBOX) */}
+      {zoomedImage && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4 animate-fade-in"
+          onClick={() => setZoomedImage(null)} // Clicar fora fecha a imagem
+        >
+          <div className="relative max-w-5xl max-h-full flex items-center justify-center">
+            {/* Botão flutuante de fechar */}
+            <button 
+              className="absolute -top-4 -right-4 md:-top-6 md:-right-6 p-2 bg-slate-800 text-slate-300 rounded-full hover:bg-slate-700 hover:text-white transition-colors border border-slate-600 shadow-lg"
+              onClick={(e) => { e.stopPropagation(); setZoomedImage(null); }}
+              title="Fechar visualização"
             >
-              <Upload size={32} className="text-gray-500" />
-              <span className="text-sm text-gray-400 font-medium">Clique para selecionar imagem</span>
+              <X size={20} />
+            </button>
+            
+            <img 
+              src={zoomedImage} 
+              alt="Imagem ampliada" 
+              className="max-w-full max-h-[90vh] rounded-xl shadow-2xl object-contain border border-slate-700/50" 
+              onClick={(e) => e.stopPropagation()} // Evita fechar se clicar direto na imagem
+            />
+          </div>
+        </div>
+      )}
+
+      {/* CABEÇALHO */}
+      <header className="flex items-center justify-between px-8 py-4 bg-slate-950 border-b border-slate-800 shrink-0 shadow-sm">
+        <div className="flex items-center space-x-3">
+          <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-serif font-bold text-sm shadow-sm">
+            H
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-slate-200 tracking-tight leading-none mb-1">
+              Tutor Socrático
+            </h1>
+            <p className="text-[11px] text-slate-500 font-medium tracking-wide uppercase">
+              Método Carlos A. Heuser
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 text-xs text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full shadow-inner">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-medium">Conectado</span>
+          </div>
+          <button onClick={limparHistorico} title="Limpar histórico da aula" className="text-slate-500 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-red-950/30">
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </header>
+
+      {/* ÁREA DE CONVERSA */}
+      <main className="flex-1 overflow-y-auto px-4 py-8 md:px-0">
+        <div className="max-w-3xl mx-auto space-y-8">
+          {messages.map((msg, index) => {
+            const isUser = msg.sender === 'user';
+
+            return (
+              <div key={index} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+                <span className="text-[10px] font-semibold tracking-wider uppercase text-slate-500 mb-1.5 px-1">
+                  {isUser ? 'Sua Dúvida' : 'Tutor'}
+                </span>
+
+                <div className={`w-full max-w-2xl rounded-2xl p-6 transition-all ${
+                    isUser
+                      ? 'bg-slate-800 border border-slate-700 text-slate-100 shadow-md'
+                      : 'bg-slate-900 border border-slate-800/80 shadow-md text-slate-300'
+                  }`}
+                >
+                  {/* IMAGENS NO HISTÓRICO (Agora também ampliam ao clicar) */}
+                  {msg.image && (
+                    <div 
+                      className="mb-5 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 flex justify-center cursor-zoom-in hover:opacity-90 transition-opacity group relative"
+                      onClick={() => setZoomedImage(msg.image)}
+                      title="Clique para ampliar"
+                    >
+                      <img src={msg.image} alt="Diagrama enviado" className="max-w-full max-h-72 object-contain rounded-lg shadow-sm" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center"></div>
+                    </div>
+                  )}
+
+                  <div className="text-[15px] leading-relaxed font-normal">
+                    <ReactMarkdown 
+                      components={{
+                        p: ({node, ...props}) => <p className="mb-4 last:mb-0" {...props} />,
+                        strong: ({node, ...props}) => <strong className="font-semibold text-indigo-300" {...props} />,
+                        em: ({node, ...props}) => <em className="italic text-slate-400" {...props} />,
+                        ul: ({node, ...props}) => <ul className="list-disc pl-5 mb-4 space-y-1" {...props} />,
+                        ol: ({node, ...props}) => <ol className="list-decimal pl-5 mb-4 space-y-1" {...props} />,
+                        li: ({node, ...props}) => <li className="pl-1" {...props} />
+                      }}
+                    >
+                      {msg.text}
+                    </ReactMarkdown>
+                  </div>
+
+                  {!isUser && msg.fontes && msg.fontes.length > 0 && (
+                    <div className="mt-6 pt-4 border-t border-slate-800 flex items-start space-x-2 text-xs text-slate-400 bg-slate-950/50 -mx-6 -mb-6 p-4 rounded-b-2xl">
+                      <BookOpen className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                      <div className="leading-relaxed">
+                        <span className="font-semibold text-slate-300">Fonte utilizada para basear a resposta:</span>{' '}
+                        {msg.fontes.join(', ')}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {loading && (
+            <div className="flex flex-col items-start animate-fade-in">
+              <span className="text-[10px] font-semibold tracking-wider uppercase text-slate-500 mb-1.5 px-1">
+                Tutor
+              </span>
+              <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-5 shadow-md flex items-center space-x-3 text-xs text-slate-400">
+                <div className="flex space-x-1.5">
+                  <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce"></div>
+                  <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-1.5 h-1.5 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+                <span className="font-medium">Processando dúvida</span>
+              </div>
             </div>
-          ) : (
-            <div className="relative border border-gray-800 rounded-xl overflow-hidden bg-gray-900">
-              <img src={imagePreview} alt="Preview" className="w-full h-auto max-h-96 object-contain" />
-              <button
-                onClick={removeImage}
-                className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 p-1.5 rounded-full text-white transition shadow-lg"
+          )}
+
+          <div ref={chatEndRef} />
+        </div>
+      </main>
+
+      {/* ÁREA DE ENTRADA (COM PREVIEW MELHORADO) */}
+      <footer className="p-6 bg-slate-950 border-t border-slate-800 shrink-0 relative">
+        <div className="max-w-3xl mx-auto">
+          
+          {/* PREVIEW DA IMAGEM ANEXADA */}
+          {imagePreview && (
+            <div className="mb-3 inline-flex items-center gap-3 bg-slate-900 border border-slate-700 p-1.5 pr-3 rounded-lg text-xs text-slate-300 shadow-sm animate-fade-in max-w-full">
+              
+              {/* Miniatura clicável */}
+              <button 
+                type="button" 
+                onClick={() => setZoomedImage(imagePreview)}
+                className="relative shrink-0 group rounded-md overflow-hidden border border-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-zoom-in"
+                title="Clique para ampliar"
+              >
+                <img src={imagePreview} alt="Miniatura" className="w-10 h-10 object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+              </button>
+              
+              {/* Nome do arquivo clicável (trunca se for muito grande) */}
+              <span 
+                className="font-medium truncate max-w-[180px] md:max-w-[350px] cursor-zoom-in hover:text-indigo-300 transition-colors" 
+                onClick={() => setZoomedImage(imagePreview)}
+                title={image?.name}
+              >
+                {image ? image.name : 'Imagem anexada'}
+              </span>
+              
+              {/* Botão de remover (separado) */}
+              <button 
+                type="button"
+                onClick={removeImage} 
+                className="text-slate-500 hover:text-red-400 transition p-1.5 rounded-md hover:bg-slate-800 ml-1 shrink-0"
+                title="Remover imagem"
               >
                 <X size={16} />
               </button>
             </div>
           )}
+
+          <form onSubmit={handleSend} className="relative flex items-end shadow-lg rounded-xl bg-slate-900 border border-slate-800 focus-within:border-slate-600 focus-within:ring-2 focus-within:ring-slate-700/50 transition-all">
+            
+            <label title="Anexar diagrama ou cálculo" className="p-4 text-slate-500 hover:text-slate-300 cursor-pointer rounded-l-xl hover:bg-slate-800/50 transition-colors h-14 flex items-center">
+              <Paperclip size={20} />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="hidden"
+                ref={fileInputRef}
+              />
+            </label>
+
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleInput}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              placeholder={imagePreview ? "Descreva a sua dúvida sobre esta imagem..." : "Digite sua dúvida..."}
+              className="w-full py-4 bg-transparent border-none focus:ring-0 resize-none outline-none text-[15px] placeholder-slate-500 text-slate-200 max-h-48 overflow-y-auto"
+              style={{ minHeight: '56px' }}
+            />
+
+            <button
+              type="submit"
+              disabled={loading || (!input.trim() && !image)}
+              className="p-4 text-indigo-500 hover:text-indigo-400 disabled:text-slate-600 transition-colors h-14 flex items-center"
+            >
+              <Send size={20} />
+            </button>
+          </form>
+
+          <p className="text-[11px] text-center text-slate-500 mt-4 font-medium">
+            Pressione <strong>Enter</strong> para enviar e <strong>Shift + Enter</strong> para pular linha.
+          </p>
         </div>
-      </div>
-
-      {/*LADO DIREITO: CHAT*/}
-      <div className="w-2/3 flex flex-col h-full bg-gray-900">
-
-        {/*Header*/}
-        <div className="p-4 border-b border-gray-800 bg-gray-950 flex items-center justify-between shadow-sm z-10">
-          <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-2 rounded-lg text-white shadow-md shadow-indigo-900/20">
-              <Bot size={20} />
-            </div>
-            <div>
-              <h1 className="font-semibold text-gray-200 tracking-wide">Tutor Socrático</h1>
-              <span className="text-xs text-emerald-400 flex items-center gap-1 font-medium">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                Online
-              </span>
-            </div>
-          </div>
-
-          <button
-            onClick={limparHistorico}
-            title="Limpar histórico de conversa"
-            className="text-gray-500 hover:text-red-400 transition-colors p-2 rounded-lg hover:bg-gray-900 flex items-center gap-2"
-          >
-            <Trash2 size={18} />
-          </button>
-        </div>
-
-        {/*Corpo de Mensagens*/}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {messages.map((msg, index) => (
-            <div key={index} className={`flex gap-3 max-w-3xl ${msg.sender === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
-              <div className={`p-2 rounded-lg h-fit text-white shadow-sm flex-shrink-0 ${msg.sender === 'user' ? 'bg-indigo-600' : 'bg-gray-800'}`}>
-                {msg.sender === 'user' ? <User size={18} /> : <Bot size={18} />}
-              </div>
-              <div className={`p-4 rounded-xl shadow-md ${msg.sender === 'user' ? 'bg-indigo-950 text-gray-100 border border-indigo-800/50 rounded-tr-none' : 'bg-gray-950 text-gray-300 border border-gray-800 rounded-tl-none'}`}>
-                {msg.image && (
-                  <img src={msg.image} alt="Enviada pelo aluno" className="rounded-lg max-h-48 mb-3 border border-gray-800 object-contain" />
-                )}
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-              </div>
-            </div>
-          ))}
-
-          {loading && (
-            <div className="flex gap-3 max-w-3xl">
-              <div className="p-2 rounded-lg h-fit bg-gray-800 text-white animate-pulse">
-                <Bot size={18} />
-              </div>
-              <div className="p-4 rounded-xl rounded-tl-none bg-gray-950 text-gray-500 italic text-sm border border-gray-800 animate-pulse flex items-center gap-2">
-                <div className="flex gap-1">
-                  <span className="w-1.5 h-1.5 bg-gray-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                  <span className="w-1.5 h-1.5 bg-gray-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                  <span className="w-1.5 h-1.5 bg-gray-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                </div>
-                Tutor analisando o material...
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/*Input de Envio*/}
-        <form onSubmit={handleSend} className="p-4 bg-gray-950 border-t border-gray-800 flex gap-3 items-center">
-          {imagePreview && (
-            <div className="flex items-center gap-1.5 bg-gray-900 border border-gray-700 px-3 py-1.5 rounded-lg text-xs text-gray-300 font-medium">
-              <ImageIcon size={14} className="text-indigo-400" /> Imagem anexada
-            </div>
-          )}
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={imagePreview ? "Digite uma dúvida sobre a imagem..." : "Faça uma pergunta sobre a matéria..."}
-            className="flex-1 bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all shadow-inner"
-          />
-          <button
-            type="submit"
-            disabled={loading || (!input.trim() && !image)}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-800 disabled:text-gray-600 disabled:border-gray-700 p-3 rounded-xl text-white transition-all shadow-md active:scale-95 flex items-center justify-center border border-indigo-500 disabled:shadow-none"
-          >
-            <Send size={18} />
-          </button>
-        </form>
-
-      </div>
+      </footer>
     </div>
   );
 }
