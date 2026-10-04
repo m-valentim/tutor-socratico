@@ -4,6 +4,6 @@ google-genai
 supabase
 python-dotenv
 httpx
-fitz
+PyMuPDF
 pymupdf
 python-multipart
