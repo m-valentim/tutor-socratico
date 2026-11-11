@@ -23,7 +23,7 @@ function carregarMensagens() {
   return [{ ...BOAS_VINDAS }];
 }
 
-// Algumas respostas chegam com as células de uma tabela na mesma linha.
+// Corrige tabelas Markdown que eventualmente chegam com separadores ou linhas agrupadas.
 function normalizarMarkdown(texto) {
   if (typeof texto !== 'string') return '';
 
@@ -33,36 +33,127 @@ function normalizarMarkdown(texto) {
     .replace(/\\\|/g, '|')
     .split('\n');
 
-  const resultado = [];
-  for (const linha of linhas) {
-    if (!linha.trim().startsWith('|')) {
-      resultado.push(linha);
-      continue;
-    }
+  function extrairCelulas(linha) {
+    const partes = linha.split('|').map((celula) => celula.trim());
 
-    const celulas = linha.trim().replace(/^\|/, '').replace(/\|$/, '')
-      .split('|').map((celula) => celula.trim());
+    if (partes[0] === '') partes.shift();
+    if (partes[partes.length - 1] === '') partes.pop();
 
-    let colunas = 0;
-    for (let n = 2; n <= 8; n++) {
-      const separadores = celulas.slice(n, n * 2);
-      if (celulas.length >= n * 2 &&
-          separadores.every((celula) => /^:?-{3,}:?$/.test(celula))) {
-        colunas = n;
-        break;
+    return partes;
+  }
+
+  function limparMarcacao(celula) {
+    return celula
+      .replace(/^\*\*(.*)\*\*$/, '$1')
+      .replace(/^__(.*)__$/, '$1')
+      .trim();
+  }
+
+  function ehSeparador(celula) {
+    return /^:?-{3,}:?$/.test(limparMarcacao(celula));
+  }
+
+  function montarLinhas(celulas, quantidadeColunas) {
+    let dados = [...celulas];
+
+    if (dados.length % quantidadeColunas !== 0) {
+      const semVazias = dados.filter((celula) => celula !== '');
+      if (semVazias.length % quantidadeColunas === 0) {
+        dados = semVazias;
       }
     }
 
-    if (!colunas || (celulas.length - 2 * colunas) % colunas !== 0) {
-      resultado.push(linha);
+    if (!dados.length || dados.length % quantidadeColunas !== 0) {
+      return null;
+    }
+
+    const linhasMontadas = [];
+    for (let i = 0; i < dados.length; i += quantidadeColunas) {
+      linhasMontadas.push(
+        `| ${dados.slice(i, i + quantidadeColunas).join(' | ')} |`,
+      );
+    }
+
+    return linhasMontadas;
+  }
+
+  const resultado = [];
+  let indice = 0;
+
+  while (indice < linhas.length) {
+    const linhaAtual = linhas[indice];
+
+    if (!linhaAtual.trim().startsWith('|')) {
+      resultado.push(linhaAtual);
+      indice += 1;
       continue;
     }
 
-    resultado.push('');
-    for (let i = 0; i < celulas.length; i += colunas) {
-      resultado.push(`| ${celulas.slice(i, i + colunas).join(' | ')} |`);
+    const cabecalho = extrairCelulas(linhaAtual);
+    const quantidadeColunas = cabecalho.length;
+
+    if (quantidadeColunas < 2) {
+      resultado.push(linhaAtual);
+      indice += 1;
+      continue;
     }
+
+    let proximo = indice + 1;
+    const separadores = [];
+
+    // O modelo às vezes insere linhas vazias e divide o separador da tabela
+    // em mais de uma linha. As linhas de separação são reunidas e substituídas
+    // por um separador Markdown válido com a mesma quantidade de colunas.
+    while (proximo < linhas.length && separadores.length < quantidadeColunas) {
+      if (!linhas[proximo].trim()) {
+        proximo += 1;
+        continue;
+      }
+
+      if (!linhas[proximo].trim().startsWith('|')) break;
+
+      const celulas = extrairCelulas(linhas[proximo]);
+      if (!celulas.length || !celulas.every(ehSeparador)) break;
+
+      separadores.push(...celulas);
+      proximo += 1;
+    }
+
+    if (separadores.length < quantidadeColunas) {
+      resultado.push(linhaAtual);
+      indice += 1;
+      continue;
+    }
+
+    resultado.push(`| ${cabecalho.join(' | ')} |`);
+    resultado.push(`| ${Array(quantidadeColunas).fill('---').join(' | ')} |`);
+
+    // Lê as linhas de dados até o fim da tabela. Se duas linhas vierem coladas,
+    // reorganiza as células usando a quantidade de colunas do cabeçalho.
+    while (proximo < linhas.length) {
+      if (!linhas[proximo].trim()) {
+        let seguinte = proximo + 1;
+        while (seguinte < linhas.length && !linhas[seguinte].trim()) seguinte += 1;
+
+        if (seguinte < linhas.length && linhas[seguinte].trim().startsWith('|')) {
+          proximo = seguinte;
+          continue;
+        }
+        break;
+      }
+
+      if (!linhas[proximo].trim().startsWith('|')) break;
+
+      const celulas = extrairCelulas(linhas[proximo]);
+      const linhasMontadas = montarLinhas(celulas, quantidadeColunas);
+
+      if (!linhasMontadas) break;
+      resultado.push(...linhasMontadas);
+      proximo += 1;
+    }
+
     resultado.push('');
+    indice = proximo;
   }
 
   return resultado.join('\n');
@@ -181,7 +272,7 @@ function Mensagem({ mensagem, onAbrirImagem }) {
             <BookOpen className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
             <div className="leading-relaxed">
               <span className="font-semibold text-slate-300">
-                Fonte utilizada para basear a resposta:
+                Referências recuperadas pelo RAG:
               </span>{' '}
               {mensagem.fontes.join(', ')}
             </div>
@@ -345,7 +436,7 @@ function App() {
               Tutor Socrático
             </h1>
             <p className="text-[11px] text-slate-500 font-medium tracking-wide uppercase">
-              Método Carlos A. Heuser
+              Base documental: Heuser (1998)
             </p>
           </div>
         </div>

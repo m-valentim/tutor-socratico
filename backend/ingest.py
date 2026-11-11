@@ -10,16 +10,19 @@ from supabase import create_client
 
 load_dotenv()
 
-ARQUIVO_PDF = "Carlos Alberto Heuser - Projeto de Banco de Dados.pdf"
-TAMANHO_TRECHO = 500
-SOBREPOSICAO = 100
-TAMANHO_LOTE = 20
-INTERVALO_LOTES = 15
+ARQUIVO_PDF = os.getenv("RAG_PDF", "Carlos Alberto Heuser - Projeto de Banco de Dados.pdf")
+MODELO_EMBEDDING = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
+TAMANHO_TRECHO = int(os.getenv("CHUNK_SIZE", "500"))
+SOBREPOSICAO = int(os.getenv("CHUNK_OVERLAP", "100"))
+TAMANHO_LOTE = int(os.getenv("EMBED_BATCH_SIZE", "20"))
+INTERVALO_LOTES = int(os.getenv("EMBED_BATCH_DELAY", "15"))
+DIMENSAO_EMBEDDING = 768
 
 
-def extrair_trechos(caminho_pdf):
-    trechos = []
-    passo = TAMANHO_TRECHO - SOBREPOSICAO
+def extrair_documento(caminho_pdf):
+    partes = []
+    intervalos_paginas = []
+    posicao = 0
 
     with fitz.open(caminho_pdf) as documento:
         for numero_pagina, pagina in enumerate(documento, start=1):
@@ -27,16 +30,49 @@ def extrair_trechos(caminho_pdf):
             if not texto:
                 continue
 
-            for inicio in range(0, len(texto), passo):
-                trecho = texto[inicio:inicio + TAMANHO_TRECHO]
-                if len(trecho) < 50:
-                    continue
+            if partes:
+                partes.append("\n")
+                posicao += 1
 
-                trechos.append({
-                    "texto_chunk": trecho,
-                    "numero_pagina": numero_pagina,
-                    "nome_documento": os.path.basename(caminho_pdf),
-                })
+            inicio = posicao
+            partes.append(texto)
+            posicao += len(texto)
+            intervalos_paginas.append((inicio, posicao, numero_pagina))
+
+    return "".join(partes), intervalos_paginas
+
+
+def pagina_da_posicao(posicao, intervalos_paginas):
+    for inicio, fim, pagina in intervalos_paginas:
+        if inicio <= posicao < fim:
+            return pagina
+    return intervalos_paginas[-1][2] if intervalos_paginas else 1
+
+
+def extrair_trechos(caminho_pdf):
+    texto, intervalos_paginas = extrair_documento(caminho_pdf)
+    if not texto:
+        return []
+
+    passo = TAMANHO_TRECHO - SOBREPOSICAO
+    if passo <= 0:
+        raise ValueError("CHUNK_OVERLAP deve ser menor que CHUNK_SIZE.")
+
+    trechos = []
+    nome_documento = os.path.basename(caminho_pdf)
+
+    for inicio in range(0, len(texto), passo):
+        trecho = texto[inicio:inicio + TAMANHO_TRECHO].strip()
+        if len(trecho) < 50:
+            continue
+
+        trechos.append(
+            {
+                "texto_chunk": trecho,
+                "numero_pagina": pagina_da_posicao(inicio, intervalos_paginas),
+                "nome_documento": nome_documento,
+            }
+        )
 
     return trechos
 
@@ -65,9 +101,9 @@ def processar_pdf():
 
         try:
             resposta = gemini.models.embed_content(
-                model="gemini-embedding-001",
+                model=MODELO_EMBEDDING,
                 contents=textos,
-                config=types.EmbedContentConfig(output_dimensionality=768),
+                config=types.EmbedContentConfig(output_dimensionality=DIMENSAO_EMBEDDING),
             )
 
             embeddings = resposta.embeddings or []
@@ -84,7 +120,6 @@ def processar_pdf():
             falhas += 1
             print(f"Falha no lote {numero_lote}: {erro}")
 
-        # A pausa evita consumir rapidamente a cota da API de embeddings.
         if inicio + TAMANHO_LOTE < len(trechos):
             time.sleep(INTERVALO_LOTES)
 
